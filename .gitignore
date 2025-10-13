@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+.venv*/
+
+# Outputs
+outputs_simple/
+
+# OS/editor
+.DS_Store
+.ipynb_checkpoints/
+
+
