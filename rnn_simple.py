@@ -183,6 +183,7 @@ def train_one_epoch(model: nn.Module, loader: DataLoader, optimizer: torch.optim
         preds = model(xb)
         loss = mse(preds, yb)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         losses.append(float(loss.detach().cpu().item()))
     return float(np.mean(losses)) if losses else float("inf")
@@ -231,7 +232,7 @@ def evaluate_test(model: nn.Module, loader: DataLoader, device: torch.device, me
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train a simple vanilla RNN on cadence time-series to predict next-step Vout.")
     p.add_argument("--data_path", type=str, default="processed_waveforms.csv")
-    p.add_argument("--seq_len", type=int, default=32)
+    p.add_argument("--seq_len", type=int, default=28)
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--lr", type=float, default=1e-3)
@@ -269,6 +270,16 @@ def main() -> None:
 
     # Identify sim_id groups and split
     train_ids, val_ids, test_ids = split_by_sim_id(df, seed=args.seed, demo=args.demo)
+    
+    # Force sim_id=38 for test
+    TARGET_SID = 38
+    # Ensure 38 exists
+    if TARGET_SID not in df["sim_id"].unique():
+        raise ValueError(f"sim_id {TARGET_SID} not found in dataset.")
+    # Remove 38 from train/val; make test exactly [38]
+    train_ids = [sid for sid in train_ids if sid != TARGET_SID]
+    val_ids   = [sid for sid in val_ids   if sid != TARGET_SID]
+    test_ids  = [TARGET_SID]
 
     # Build sequences for splits
     train_data = build_sequences_for_ids(df, train_ids, args.seq_len, feature_cols)
@@ -299,13 +310,28 @@ def main() -> None:
     # Train
     best_val = float("inf")
     best_path = os.path.join(args.out_dir, "best_rnn.pt")
+    train_curve, val_curve = [], []
     for epoch in range(1, args.epochs + 1):
         train_mse = train_one_epoch(model, train_loader, optimizer, device)
         val_mse = evaluate_mse(model, val_loader, device)
+        train_curve.append(train_mse)
+        val_curve.append(val_mse)
         print(f"Epoch {epoch:03d} | Train MSE: {train_mse:.6f} | Val MSE: {val_mse:.6f}")
         if val_mse < best_val:
             best_val = val_mse
             torch.save(model.state_dict(), best_path)
+
+    # Save training curve
+    plt.figure(figsize=(7,4))
+    plt.plot(train_curve, label="Train MSE")
+    plt.plot(val_curve, label="Val MSE")
+    plt.xlabel("Epoch")
+    plt.ylabel("MSE")
+    plt.title("Training/Validation MSE")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.out_dir, "loss_curve_mse.png"))
+    plt.close()
 
     # Load best and evaluate on test
     if os.path.exists(best_path):
@@ -318,29 +344,56 @@ def main() -> None:
         "y_true": test_data.y,
     }
     test_mae, test_df = evaluate_test(model, test_loader, device, test_meta)
-    print(f"Test MAE: {test_mae:.6f}")
+    
+    # Compute MSE from saved predictions
+    test_mse = float(np.mean((test_df["y_true"].to_numpy() - test_df["y_pred"].to_numpy())**2))
+    
+    print(f"[sim_id=38] Test MAE: {test_mae:.6f} | Test MSE: {test_mse:.6f} | seq_len={args.seq_len}")
 
     # Save predictions
     csv_path = os.path.join(args.out_dir, "test_preds.csv")
     test_df.to_csv(csv_path, index=False)
 
-    # Plot first sim_id in test
+    # Plot sim_id=38
     if len(test_df) > 0:
-        first_sid = int(test_df["sim_id"].iloc[0])
-        sub = test_df[test_df["sim_id"] == first_sid].sort_values("t_s")
-        plt.figure(figsize=(8, 4))
-        plt.plot(sub["t_s"].to_numpy(), sub["y_true"].to_numpy(), label="True")
-        plt.plot(sub["t_s"].to_numpy(), sub["y_pred"].to_numpy(), label="Pred", alpha=0.8)
-        plt.xlabel("t_s")
-        plt.ylabel("Vout")
-        plt.title(f"Pred vs True Vout (sim_id={first_sid})")
-        plt.legend()
-        plt.tight_layout()
-        # Save separate plot names for demo vs full runs
-        suffix = "demo" if args.demo else "full"
-        plot_name = f"pred_vs_true_first_sim_{suffix}.png"
-        plt.savefig(os.path.join(args.out_dir, plot_name))
-        plt.close()
+        TARGET_SID = 38
+        sub = test_df[test_df["sim_id"] == TARGET_SID].sort_values("t_s")
+        if len(sub) > 0:
+            plt.figure(figsize=(8, 4))
+            plt.plot(sub["t_s"].to_numpy(), sub["y_true"].to_numpy(), label="True")
+            plt.plot(sub["t_s"].to_numpy(), sub["y_pred"].to_numpy(), label="Pred", alpha=0.8)
+            plt.xlabel("t_s")
+            plt.ylabel("Vout")
+            plt.title(f"Pred vs True Vout (sim_id={TARGET_SID})\nMAE={test_mae:.4e}  |  MSE={test_mse:.4e}")
+            plt.legend()
+            plt.tight_layout()
+            suffix = "demo" if args.demo else "full"
+            plot_name = f"pred_vs_true_sim38_{suffix}.png"
+            plt.savefig(os.path.join(args.out_dir, plot_name))
+            plt.close()
+            
+            # Residuals analysis
+            res = sub["y_pred"].to_numpy() - sub["y_true"].to_numpy()
+
+            # Residual vs time
+            plt.figure(figsize=(8,3.8))
+            plt.plot(sub["t_s"].to_numpy(), res)
+            plt.xlabel("t_s")
+            plt.ylabel("Residual (pred - true)")
+            plt.title("Residuals vs Time (sim_id=38)")
+            plt.tight_layout()
+            plt.savefig(os.path.join(args.out_dir, "residuals_vs_time_sim38.png"))
+            plt.close()
+
+            # Residual histogram
+            plt.figure(figsize=(6,3.8))
+            plt.hist(res, bins=40)
+            plt.xlabel("Residual")
+            plt.ylabel("Count")
+            plt.title("Residual Distribution (sim_id=38)")
+            plt.tight_layout()
+            plt.savefig(os.path.join(args.out_dir, "residual_hist_sim38.png"))
+            plt.close()
 
     print(f"Saved best model to: {best_path}")
     print(f"Saved predictions to: {csv_path}")
