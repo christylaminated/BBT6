@@ -23,6 +23,8 @@ This prediction model is highly relevant to Cadence's operations as it helps to 
 
 ## 📂 Repository Structure (NOT DONE)
 The repository is organized into the following directories:
+```text
+
 ├── models/
 │   └── transformer/            # Transformer model updates and files
 ├── scripts/                    # Utility scripts (e.g., LSTM model generation)
@@ -35,6 +37,7 @@ The repository is organized into the following directories:
 ├── full_waveforms.zip          # Compressed archive of the full dataset
 ├── correlation_heatmap.png     # Visualization of feature correlations (EDA)
 └── README.md                   # Project documentation
+```
 
 ## 📊 Data Exploration (EDA)
 **Dataset Description:**
