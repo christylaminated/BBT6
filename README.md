@@ -23,7 +23,18 @@ This prediction model is highly relevant to Cadence's operations as it helps to 
 
 ## 📂 Repository Structure (NOT DONE)
 The repository is organized into the following directories:
-
+├── models/
+│   └── transformer/            # Transformer model updates and files
+├── scripts/                    # Utility scripts (e.g., LSTM model generation)
+├── Seq2Seq_Model.py            # Source code for the Seq2Seq architecture
+├── gru_model.py                # Source code for the GRU architecture
+├── waveforms.csv               # Raw voltage waveform dataset
+├── metadata.csv                # Circuit metadata (sim_ids, parameters)
+├── processed_waveforms.csv     # Preprocessed data with feature engineering
+├── downsampled_waveforms.csv   # Data with redundant flat regions removed
+├── full_waveforms.zip          # Compressed archive of the full dataset
+├── correlation_heatmap.png     # Visualization of feature correlations (EDA)
+└── README.md                   # Project documentation
 
 ## 📊 Data Exploration (EDA)
 **Dataset Description:**
